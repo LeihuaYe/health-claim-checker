@@ -1,0 +1,136 @@
+import streamlit as st
+import anthropic
+import os
+
+# ── Page config ──────────────────────────────────────────────────────────────
+st.set_page_config(
+    page_title="Health Claim Checker",
+    page_icon="🔬",
+    layout="centered",
+)
+
+st.title("🔬 Health Claim Checker")
+st.caption("Paste any viral health claim or article URL. Get an evidence-based credibility score.")
+
+# ── API key ───────────────────────────────────────────────────────────────────
+api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+if not api_key:
+    api_key = st.text_input(
+        "Anthropic API Key",
+        type="password",
+        placeholder="sk-ant-...",
+        help="Get yours at console.anthropic.com",
+    )
+    if not api_key:
+        st.info("Enter your Anthropic API key to get started.")
+        st.stop()
+
+client = anthropic.Anthropic(api_key=api_key)
+
+# ── Input ─────────────────────────────────────────────────────────────────────
+claim = st.text_area(
+    "Health claim or article URL",
+    placeholder='e.g. "Cold showers boost testosterone by 200%" or paste a URL',
+    height=100,
+)
+
+analyze = st.button("Analyze Claim", type="primary", disabled=not claim.strip())
+
+# ── Analysis ──────────────────────────────────────────────────────────────────
+SYSTEM_PROMPT = """You are a rigorous evidence-based health scientist with expertise in
+epidemiology, statistics, and causal inference. Your job is to evaluate viral health claims
+using the same standards you would apply to academic peer review.
+
+You must be honest, precise, and calibrated — neither dismissive nor credulous.
+Always distinguish between statistical significance and practical significance."""
+
+ANALYSIS_PROMPT = """Evaluate this health claim: {claim}
+
+Search for the original source/study if needed. Then analyze it across these 6 dimensions:
+
+1. SOURCE QUALITY — Is this peer-reviewed? What journal tier? Preprint? Blog? Press release?
+2. STUDY DESIGN — RCT, observational, animal study, n-of-1, meta-analysis? Rate the design quality.
+3. SAMPLE SIZE — Was it adequately powered to detect the claimed effect size?
+4. EFFECT SIZE — Is the effect statistically AND practically significant? Report actual numbers.
+5. REPLICATION — Is this consistent with the broader literature or an outlier?
+6. MEDIA DISTORTION — Does the headline/claim accurately represent what the study actually found?
+
+Output format (strictly follow this):
+
+## Credibility Score: [X/100]
+**[One-line verdict: Likely True / Partially True / Misleading / Likely False / Unverified]**
+
+---
+
+### 1. Source Quality
+[2-3 sentences]
+
+### 2. Study Design
+[2-3 sentences]
+
+### 3. Sample Size
+[2-3 sentences]
+
+### 4. Effect Size
+[2-3 sentences with actual numbers if available]
+
+### 5. Replication
+[2-3 sentences]
+
+### 6. Media Distortion
+[2-3 sentences comparing claim to actual evidence]
+
+---
+
+### Bottom Line
+[2-3 sentences plain-English verdict for a general audience]
+
+### Confidence in This Assessment
+[Low / Medium / High] — [one sentence explaining why]
+"""
+
+if analyze and claim.strip():
+    with st.spinner("Analyzing claim... searching literature..."):
+        try:
+            response = client.messages.create(
+                model="claude-opus-4-6",
+                max_tokens=2000,
+                thinking={"type": "adaptive"},
+                system=SYSTEM_PROMPT,
+                messages=[
+                    {"role": "user", "content": ANALYSIS_PROMPT.format(claim=claim.strip())}
+                ],
+            )
+
+            # Extract text (skip thinking blocks)
+            result_text = ""
+            for block in response.content:
+                if block.type == "text":
+                    result_text = block.text
+                    break
+
+            st.markdown("---")
+            st.markdown(result_text)
+
+            # Save to history
+            if "history" not in st.session_state:
+                st.session_state.history = []
+            st.session_state.history.append({
+                "claim": claim.strip(),
+                "result": result_text,
+            })
+
+        except anthropic.AuthenticationError:
+            st.error("Invalid API key. Check your key at console.anthropic.com.")
+        except anthropic.RateLimitError:
+            st.error("Rate limit hit. Wait a moment and try again.")
+        except Exception as e:
+            st.error(f"Error: {e}")
+
+# ── History ───────────────────────────────────────────────────────────────────
+if st.session_state.get("history"):
+    with st.expander(f"📋 Session history ({len(st.session_state.history)} claims)"):
+        for i, item in enumerate(reversed(st.session_state.history), 1):
+            st.markdown(f"**{i}. {item['claim'][:80]}{'...' if len(item['claim']) > 80 else ''}**")
+            st.markdown(item["result"][:300] + "...")
+            st.divider()
