@@ -93,21 +93,40 @@ if analyze and claim.strip():
     with st.spinner("Analyzing claim... searching literature..."):
         try:
             response = client.messages.create(
-                model="claude-opus-4-6",
+                model="claude-opus-4-7",
                 max_tokens=2000,
                 thinking={"type": "adaptive"},
-                system=SYSTEM_PROMPT,
+                # System prompt is static across all queries — cache it so
+                # subsequent claims in the same session hit the prompt
+                # cache (5-min TTL). Cuts input cost on the system block
+                # by ~90%.
+                system=[{
+                    "type": "text",
+                    "text": SYSTEM_PROMPT,
+                    "cache_control": {"type": "ephemeral"},
+                }],
+                # Server-side web search lets the model actually verify
+                # claims against primary sources (the prompt explicitly
+                # tells it to "search for the original source/study if
+                # needed" — before this tool was wired up that instruction
+                # was dead weight).
+                tools=[{
+                    "type": "web_search_20250305",
+                    "name": "web_search",
+                    "max_uses": 5,
+                }],
                 messages=[
                     {"role": "user", "content": ANALYSIS_PROMPT.format(claim=claim.strip())}
                 ],
             )
 
-            # Extract text (skip thinking blocks)
+            # Extract final text — skip thinking, tool_use, web_search_tool_result
+            # blocks. Take the LAST text block (post-search reasoning) so the
+            # answer reflects what the model said after consulting sources.
             result_text = ""
             for block in response.content:
                 if block.type == "text":
                     result_text = block.text
-                    break
 
             st.markdown("---")
             st.markdown(result_text)

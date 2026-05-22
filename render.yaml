@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: health-claim-checker
+    runtime: python
+    plan: free
+    region: oregon
+    buildCommand: pip install -r requirements.txt
+    startCommand: streamlit run app.py --server.port $PORT --server.address 0.0.0.0 --server.headless true
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11"
+      - key: ANTHROPIC_API_KEY
+        sync: false   # set in Render dashboard, do not bake into repo
+    healthCheckPath: /
