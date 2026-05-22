@@ -34,7 +34,25 @@ claim = st.text_area(
     height=100,
 )
 
-analyze = st.button("Analyze Claim", type="primary", disabled=not claim.strip())
+# Per-session usage cap. Each analysis can fire up to 5 web_search
+# calls + 1 model call, so unconstrained use on a public deploy could
+# add up fast. 20 claims/session is generous for honest use without
+# letting a single browser tab drain the budget.
+MAX_CLAIMS_PER_SESSION = 20
+claims_used = len(st.session_state.get("history", []))
+budget_left = MAX_CLAIMS_PER_SESSION - claims_used
+st.caption(f"Session budget: {budget_left}/{MAX_CLAIMS_PER_SESSION} claims remaining")
+
+analyze = st.button(
+    "Analyze Claim",
+    type="primary",
+    disabled=not claim.strip() or budget_left <= 0,
+)
+if budget_left <= 0:
+    st.warning(
+        f"Session cap of {MAX_CLAIMS_PER_SESSION} claims reached. "
+        "Refresh the page to start a new session."
+    )
 
 # ── Analysis ──────────────────────────────────────────────────────────────────
 SYSTEM_PROMPT = """You are a rigorous evidence-based health scientist with expertise in
